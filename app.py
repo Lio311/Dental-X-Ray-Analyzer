@@ -1,80 +1,94 @@
 import streamlit as st
-import cv2
-import numpy as np
-from PIL import Image
-from ultralytics import YOLO
-import tempfile
-import os
+import pandas as pd
+# יבוא הספריות החדשות
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.options import Options
+from webdriver_manager.chrome import ChromeDriverManager
+from bs4 import BeautifulSoup
+import re
+import time
 
-# --- PAGE CONFIGURATION ---
-st.set_page_config(layout="wide", page_title="Dental X-Ray Analyzer")
-st.title("🦷 Dental X-Ray Analyzer")
-st.markdown("Upload a dental X-ray image (periapical, bitewing, or panoramic) to detect potential caries.")
+# --- 1. נתוני קונפיגורציה ---
+# ... (שאר ההגדרות כמו קודם) ...
 
-# --- MODEL PATH SETUP ---
-# !!! IMPORTANT !!!
-# Make sure your trained model file is in the same directory.
-MODEL_PATH = "best.pt" 
+COMPETITORS = {
+    "KSP": "https://ksp.co.il/",
+    "Kol_B_Yehuda": "https://kolboyehuda.co.il/",
+}
 
-# --- MODEL LOADING (Cached) ---
-# Use st.cache_resource to load the large model file only once
+# ... (MY_INVENTORY ושאר ההגדרות) ...
+
+# --- הוספת ניהול ה-WebDriver גלובלית (עבור Streamlit) ---
+
 @st.cache_resource
-def load_model(model_path):
+def get_chrome_driver():
+    """מגדיר ומחזיר את מנהל הדפדפן של סלניום."""
+    # הגדרת אופציות לכרום (Headless: ללא ממשק גרפי, כדי שירוץ מהר יותר)
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    
+    # User-Agent חדש כדי להיראות יותר כמו אדם אמיתי
+    user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    chrome_options.add_argument(f'user-agent={user_agent}')
+
+    # שימוש ב-webdriver_manager כדי לנהל את הדרייבר
+    service = Service(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=chrome_options)
+    driver.set_page_load_timeout(30) # הגבלת זמן טעינת עמוד
+    return driver
+
+# קריאה לדרייבר בתחילת הריצה
+try:
+    DRIVER = get_chrome_driver()
+except Exception as e:
+    st.error(f"שגיאה בהפעלת Chrome Driver: {e}. ודא שהתקנת Selenium ו-Chrome.")
+    DRIVER = None
+
+
+def search_and_scrape_ksp(query):
     """
-    Loads the YOLOv8 model from the specified path.
+    מבצע חיפוש ב-KSP באמצעות Selenium כדי לעקוף את שגיאת 403.
     """
-    try:
-        # The YOLO class automatically handles loading weights
-        model = YOLO(model_path)
-        return model
-    except Exception as e:
-        st.error(f"Error loading the model: {e}")
-        st.info(f"Please ensure the trained model file named '{model_path}' is in the project directory.")
+    if not DRIVER:
         return None
 
-# --- HELPER FUNCTION: DRAW DETECTION BOXES ---
-def draw_detections(image, results):
-    """
-    Draws the bounding boxes and labels onto the image.
+    # הקידוד לחיפוש URL
+    search_query = query.replace(' ', '+')
+    search_url = f"{COMPETITORS['KSP']}web/search/index.aspx?search={search_query}"
     
-    Args:
-        image (PIL.Image): The original image.
-        results (list): The list of results from the YOLO model.
+    try:
+        # פתיחת הדף באמצעות Selenium
+        DRIVER.get(search_url)
+        time.sleep(3) # המתנה לטעינת התוכן (במיוחד אם יש JS)
         
-    Returns:
-        numpy.ndarray: The image as a NumPy array with detections drawn.
-    """
-    # 1. Convert PIL Image to OpenCV (NumPy array, BGR format)
-    img_np = np.array(image)
-    img_cv = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR) 
-
-    detection_color = (0, 0, 255) # BGR: Red (standard for Caries)
-
-    # 2. Loop through all results and boxes
-    for result in results:
-        boxes = result.boxes  
-        names = result.names  
+        # שימוש ב-BeautifulSoup על התוכן ש-Selenium טען
+        soup = BeautifulSoup(DRIVER.page_source, 'html.parser')
         
-        for box in boxes:
-            # Get coordinates, confidence, and class index
-            x1, y1, x2, y2 = map(int, box.xyxy[0])
-            conf = float(box.conf[0])
-            cls_index = int(box.cls[0])
-            
-            # Create the label text
-            label_name = names[cls_index] if cls_index in names else f"Class {cls_index}"
-            label = f"{label_name} {conf:.2f}"
-            
-            # Draw the rectangle (Bounding Box)
-            cv2.rectangle(img_cv, (x1, y1), (x2, y2), detection_color, 2)
-            
-            # Draw the label text above the box
-            cv2.putText(img_cv, label, (x1, y1 - 10), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, detection_color, 2)
+        # *** חשוב: סלקטורים מעודכנים שצריך לאמת ***
+        # מחפש את המחיר בתוך כרטיס המוצר
+        price_tag = soup.find('div', class_='ProductCardPrice') 
+        
+        if price_tag:
+            # מנקה וממיר למספר (מסיר שקלים, פסיקים וכד')
+            price_text = price_tag.text.strip()
+            # משתמש ב-Regex כדי למצוא רק מספרים
+            clean_price = re.sub(r'[^\d]', '', price_text) 
+            return int(clean_price)
+        return None # לא נמצא מחיר
+        
+    except Exception as e:
+        # הודעת שגיאה פחות חמורה, מאחר ש-403 נפתרה
+        st.warning(f"שגיאת Scraping ב-KSP עבור {query}: {e}")
+        return None
 
-    # 3. Convert back from BGR to RGB for Streamlit display
-    img_rgb = cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB)
-    return img_rgb
 
-# --- APPLICATION START ---
-model =
+def search_and_scrape_kolboyehuda(query):
+    # נשאיר את הפונקציה הזו כרגע כפי שהיא, או שנשנה גם אותה ל-Selenium אם יהיו חסימות.
+    # כרגע נשתמש ב-Mock Data כיוון שהגישה לאתר זה מורכבת
+    return None # חזרה על None כי קשה לגשת ללא Scraping מתקדם/Selenium
+
+# ... (שאר הקוד של run_price_analysis ושל ממשק Streamlit נשאר כמעט זהה) ...
