@@ -9,7 +9,7 @@ import os
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
     page_title="Dental X-Ray Caries Analyzer",
-    page_icon="",
+    page_icon="🦷",
     layout="wide"
 )
 
@@ -78,7 +78,7 @@ def draw_detections(image, results):
 # 3. STREAMLIT UI AND EXECUTION
 # ==============================================================================
 
-st.title("🦷 Dental X-Ray Caries Analyzer")
+st.title("Dental X-Ray Caries Analyzer")
 st.markdown("Upload a dental X-ray image to identify potential cavities using a custom-trained YOLOv8 model.")
 
 model = load_model(MODEL_PATH)
