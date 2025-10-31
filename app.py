@@ -9,7 +9,7 @@ import os
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
     page_title="Dental X-Ray Caries Analyzer",
-    page_icon="🦷",
+    page_icon="",
     layout="wide"
 )
 
